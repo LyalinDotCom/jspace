@@ -1,0 +1,17 @@
+# model weights — always local, never in git (16 GB); re-fetch with
+#   npm run import-model
+model/
+
+# J-lens calibration output (1.1 GB, model-specific)
+calib/
+
+# environments & deps
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+
+# build & logs
+web/dist/
+*.log
+.DS_Store

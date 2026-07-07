@@ -1,0 +1,24 @@
+{
+  "name": "jspace-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chat with a local Gemma 4 E4B while watching its J-space (global workspace) in real time",
+  "workspaces": [
+    "web"
+  ],
+  "scripts": {
+    "setup": "bash scripts/setup.sh",
+    "import-model": ".venv/bin/python scripts/import_model.py",
+    "calibrate": ".venv/bin/python calibrate_jlens.py",
+    "validate": ".venv/bin/python validate_jlens.py",
+    "test": ".venv/bin/python scripts/test_suite.py",
+    "dev": "concurrently -k -n api,web -c blue,green \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": ".venv/bin/python server.py",
+    "dev:web": "npm --prefix web run dev",
+    "build": "npm --prefix web run build",
+    "start": "npm run build && .venv/bin/python server.py"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

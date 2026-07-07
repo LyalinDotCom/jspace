@@ -1,0 +1,8 @@
+torch>=2.12
+transformers>=5.13
+accelerate
+safetensors
+huggingface_hub
+fastapi
+uvicorn[standard]
+websockets
