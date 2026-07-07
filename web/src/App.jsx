@@ -143,7 +143,7 @@ export default function App() {
   }
 
   const tracked = trackTokens.length > 0
-  const effColor = colorBy === 'auto' ? (tracked ? 'rank' : 'conf') : colorBy
+  const effColor = colorBy === 'auto' ? (tracked ? 'rank' : 'emerge') : colorBy
 
   // watchlist alerts: a pinned concept "surfaces" when its lens rank is high
   // somewhere in the workspace band (middle third up to just below output)
@@ -237,7 +237,8 @@ export default function App() {
             </label>
             <label>color
               <select value={colorBy} onChange={e => setColorBy(e.target.value)}>
-                <option value="auto">auto</option>
+                <option value="auto">auto ({tracked ? 'pinned rank' : 'answer emergence'})</option>
+                <option value="emerge">answer emergence</option>
                 <option value="conf">lens confidence</option>
                 <option value="prob" disabled={!tracked}>pinned p</option>
                 <option value="rank" disabled={!tracked}>pinned rank</option>
@@ -256,6 +257,7 @@ export default function App() {
           <div className="legend">
             rows = layers (embeddings at bottom) · columns = token positions ·
             color = {{
+              emerge: "answer emergence — how highly each layer ranks the model's eventual prediction (bright = already decided)",
               conf: 'lens confidence (low entropy)',
               prob: 'pinned-token probability',
               rank: 'pinned-token rank (bright = rank 1)',
@@ -294,6 +296,7 @@ function sliceRow(Lr, i) {
     topk_p: Lr.topk_p[i],
     entropy: Lr.entropy[i],
     kurt: Lr.kurt ? Lr.kurt[i] : 0,
+    final_rank: Lr.final_rank ? Lr.final_rank[i] : null,
     track_p: Lr.track_p ? Lr.track_p.map(a => a[i]) : null,
     track_rank: Lr.track_rank ? Lr.track_rank.map(a => a[i]) : null,
   }

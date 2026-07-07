@@ -24,11 +24,14 @@ and act on.
 Modeled on the paper's interactive Figure 5 and the layer-signature plots of
 Figure 28:
 
-- **Heatmap** (layers × positions). Color modes: *lens confidence*
-  (1 − entropy), *pinned-token probability*, *pinned-token rank* (bright =
-  rank 1, log scale — the paper's preferred encoding, readable even when
-  probabilities are tiny), and *excess kurtosis* (see below). `auto` picks
-  rank when something is pinned, confidence otherwise.
+- **Heatmap** (layers × positions). Color modes: *answer emergence* (how
+  highly each layer ranks the token the model eventually predicts at that
+  position — bright = that layer has already "decided"; needs no setup and
+  is the default), *pinned-token rank* (bright = rank 1, log scale — the
+  paper's preferred encoding, readable even when probabilities are tiny),
+  *pinned-token probability*, *lens confidence* (1 − entropy), and *excess
+  kurtosis* (see below). `auto` picks pinned rank when something is pinned,
+  answer emergence otherwise.
 - **Hover readout**: top-k tokens + probabilities, pinned ranks, entropy and
   kurtosis for any (layer, position) cell.
 - **Position inspector** (click a column): the full layer-by-layer readout at

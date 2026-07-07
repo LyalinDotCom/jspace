@@ -26,6 +26,8 @@ function cellValue(cell, l, colorBy) {
       return L.track_p ? Math.max(...L.track_p) : 0
     case 'kurt':
       return Math.min(1, Math.max(0, (L.kurt ?? 0) / 60))
+    case 'emerge':
+      return L.final_rank != null ? rankValue(L.final_rank) : 0
     default: // conf
       return 1 - Math.min(1, L.entropy / 10)
   }
@@ -117,6 +119,9 @@ function Tip({ tip }) {
           <b>pin #{i + 1}</b><span>rank {r} · {(L.track_p[i] * 100).toFixed(2)}%</span>
         </div>
       ))}
+      {L.final_rank != null && (
+        <div className="r"><span>eventual answer here</span><span>rank {L.final_rank}</span></div>
+      )}
       <div className="r"><span>entropy {L.entropy} nats</span><span>kurt {L.kurt}</span></div>
     </div>
   )

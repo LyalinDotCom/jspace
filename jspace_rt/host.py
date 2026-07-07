@@ -96,7 +96,15 @@ class Host:
         Returns per (layer, position): top-k token ids/probs, entropy, and
         probability of tracked token ids.
         """
+        # what the model will actually predict at each position (final layer's
+        # argmax) — used for the zero-setup "answer emergence" color mode
+        nl = len(hidden_states) - 1
+        z_last = self.lens_logits(hidden_states[-1][0].float(), nl, mode="logit")
+        final_ids = z_last.argmax(-1)  # [S]
+
         out = []
+        S = hidden_states[0].shape[1]
+        idx = torch.arange(S, device=final_ids.device)
         for l, h in enumerate(hidden_states):
             z = self.lens_logits(h[0].float(), l, mode=mode)
             p = torch.softmax(z, dim=-1)
@@ -106,11 +114,14 @@ class Host:
             # (peaks in middle layers — fig. 28b of the J-space paper)
             zn = (z - z.mean(-1, keepdim=True)) / (z.std(-1, keepdim=True) + 1e-6)
             kurt = (zn ** 4).mean(-1) - 3.0
+            p_final = p[idx, final_ids]
+            final_rank = (p > p_final.unsqueeze(-1)).sum(-1) + 1
             row = {
                 "topk_ids": tk.indices.cpu().tolist(),
                 "topk_p": [[round(x, 5) for x in r] for r in tk.values.cpu().tolist()],
                 "entropy": [round(x, 3) for x in ent.cpu().tolist()],
                 "kurt": [round(x, 2) for x in kurt.cpu().tolist()],
+                "final_rank": final_rank.cpu().tolist(),
             }
             if track_ids:
                 row["track_p"] = [
