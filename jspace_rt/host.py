@@ -20,15 +20,18 @@ _ROOT = os.path.join(os.path.dirname(__file__), "..")
 
 
 def default_model_dir():
-    """JSPACE_MODEL env wins; otherwise prefer the instruct model (the chat
-    UI and the paper's demos assume an assistant), else the base model."""
+    """JSPACE_MODEL env wins; otherwise pick the most capable instruct model
+    present (the chat UI and the paper's demos assume an assistant), falling
+    back to the base model."""
     env = os.environ.get("JSPACE_MODEL")
     if env:
         return env if os.path.isabs(env) else os.path.join(_ROOT, "model", env)
-    it = os.path.join(_ROOT, "model", "gemma-4-E4B-it")
-    if os.path.exists(os.path.join(it, "config.json")):
-        return it
-    return os.path.join(_ROOT, "model", "gemma-4-E4B")
+    for name in ("gemma-4-26B-A4B-it", "gemma-4-E4B-it", "gemma-4-E2B-it",
+                 "gemma-4-E4B"):
+        d = os.path.join(_ROOT, "model", name)
+        if os.path.exists(os.path.join(d, "config.json")):
+            return d
+    return os.path.join(_ROOT, "model", "gemma-4-E4B-it")
 
 
 def jlens_path(model_dir):
