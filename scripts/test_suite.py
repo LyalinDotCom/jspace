@@ -99,13 +99,18 @@ def main():
     check("lens rows complete", len(lens) == host.n_layers + 1
           and all(len(r["entropy"]) == ids.shape[1] for r in lens))
 
-    band = range(30, 41)
+    nl = host.n_layers + 1
+    band = range(int(nl * 0.70), nl - 2)  # workspace band, relative depth
     p_spider = max(lens[l]["track_p"][0][-1] for l in band)
-    check("unspoken intermediate (logit lens)", p_spider > 0.2,
-          f"max p(' spiders') in L30-40 at last prompt pos = {p_spider:.3f}")
+    # workspace strength scales with model size (paper fig. 10) — 0.15 admits
+    # E2B while still requiring a strong, unambiguous signal (vocab is 262k)
+    check("unspoken intermediate (logit lens)", p_spider > 0.15,
+          f"max p(' spiders') in L{band.start}-{band.stop - 1} at last prompt pos = {p_spider:.3f}")
 
-    kurt_mid = sum(sum(lens[l]["kurt"]) / len(lens[l]["kurt"]) for l in range(20, 40)) / 20
-    kurt_early = sum(sum(lens[l]["kurt"]) / len(lens[l]["kurt"]) for l in range(1, 15)) / 14
+    def kmean(rng):
+        return sum(sum(lens[l]["kurt"]) / len(lens[l]["kurt"]) for l in rng) / len(rng)
+    kurt_mid = kmean(range(nl // 2, nl - 3))
+    kurt_early = kmean(range(1, nl // 3))
     check("workspace kurtosis signature", kurt_mid > kurt_early,
           f"mid={kurt_mid:.1f} vs early={kurt_early:.1f}")
 
@@ -114,10 +119,11 @@ def main():
                                 track_ids=[host.tok.encode(" spiders", add_special_tokens=False)[0]])
         pj = max(lens_j[l]["track_p"][0][-1] for l in band)
         check("unspoken intermediate (J-lens)", pj > 0.1,
-              f"max p(' spiders') in L30-40 = {pj:.3f}")
-        top5_join = " ".join(lens_j[36]["topk_ids"] and
-                             [host.tok.decode([i]) for i in lens_j[36]["topk_ids"][-1]])
-        check("J-lens reads concept at L36", "spider" in top5_join.lower(), f"L36 top5: {top5_join!r}")
+              f"max p(' spiders') in L{band.start}-{band.stop - 1} = {pj:.3f}")
+        lmid = int(nl * 0.85)
+        top5_join = " ".join(host.tok.decode([i]) for i in lens_j[lmid]["topk_ids"][-1])
+        check(f"J-lens reads concept at L{lmid}", "spider" in top5_join.lower(),
+              f"L{lmid} top5: {top5_join!r}")
     elif host.jlens is None:
         print("  [SKIP] J-lens not calibrated")
 

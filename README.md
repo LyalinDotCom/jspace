@@ -90,9 +90,16 @@ Two official Google models are supported:
   (google/gemma-4-E4B-it). The chat UI and the paper's demos assume an
   assistant, so this is the default when present. Fetch:
   `npm run import-model -- --repo google/gemma-4-E4B-it --out model/gemma-4-E4B-it`
+- **`model/gemma-4-E2B-it`** — the **smallest Gemma 4** (2.3B effective,
+  35 layers, d=1536): faster everywhere (load, tokens/s, calibration) at
+  some readout quality cost. Fetch:
+  `npm run import-model -- --repo google/gemma-4-E2B-it --out model/gemma-4-E2B-it`
+  and run with `JSPACE_MODEL=gemma-4-E2B-it npm run dev`.
 - **`model/gemma-4-E4B`** — the base/pretrained release
-  (google/gemma-4-E4B). Interesting for raw-completion lens work. Fetch:
-  `npm run import-model`
+  (google/gemma-4-E4B). Interesting for raw-completion lens work — but note
+  the workspace demos largely require an instruct model; on the raw base
+  model the J-space band fills with answer-prep tokens instead of the
+  unspoken concept. Fetch: `npm run import-model`
 
 Pick explicitly with the `JSPACE_MODEL` env var (name under `model/` or an
 absolute path): `JSPACE_MODEL=gemma-4-E4B npm run dev:api`. Calibrations are

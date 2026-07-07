@@ -138,22 +138,31 @@ class Host:
 
     def _encode(self, prompt, chat):
         """Gemma 4 is degenerate without <bos>, and this tokenizer does not
-        add it — prepend explicitly. Chat uses the Gemma 4 turn format from
-        tokenizer_config (sot <|turn>, eot <turn|>). `prompt` is either a raw
+        add it on plain encode — ensure it explicitly. Chat prefers the
+        official chat_template shipped with -it releases (which renders
+        `<bos><|turn>user\\n…<turn|>\\n<|turn>model\\n` and includes <bos>
+        itself); the manual fallback produces the identical string for
+        template-less checkpoints (e.g. the base model). `prompt` is a raw
         string or, for chat, a string / list of {role, content} messages."""
         if chat:
             msgs = prompt if isinstance(prompt, list) else [
                 {"role": "user", "content": prompt}]
-            text = ""
-            for m in msgs:
-                role = "model" if m["role"] in ("assistant", "model") else "user"
-                text += f"<|turn>{role}\n{m['content']}<turn|>\n"
-            text += "<|turn>model\n"
+            if getattr(self.tok, "chat_template", None):
+                text = self.tok.apply_chat_template(
+                    [{"role": "assistant" if m["role"] in ("assistant", "model")
+                      else "user", "content": m["content"]} for m in msgs],
+                    add_generation_prompt=True, tokenize=False)
+            else:
+                text = "".join(
+                    f"<|turn>{'model' if m['role'] in ('assistant', 'model') else 'user'}"
+                    f"\n{m['content']}<turn|>\n" for m in msgs) + "<|turn>model\n"
         else:
             text = prompt
         ids = self.tok(text, add_special_tokens=False, return_tensors="pt").input_ids
         bos = self.tok.bos_token_id or 2
-        return torch.cat([torch.tensor([[bos]], dtype=ids.dtype), ids], dim=1)
+        if ids[0, 0].item() != bos:  # template may have included <bos> already
+            ids = torch.cat([torch.tensor([[bos]], dtype=ids.dtype), ids], dim=1)
+        return ids
 
     @torch.no_grad()
     def generate_stream(self, prompt, max_new_tokens=64, temperature=0.0,

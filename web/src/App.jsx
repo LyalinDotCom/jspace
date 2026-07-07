@@ -9,6 +9,11 @@ const EOT = '<turn|>'
 // kind of "silent thought" surfacing in the J-space before any output.
 const DEMOS = [
   {
+    name: 'lying — truth stays in workspace',
+    prompt: "Let's play a game: answer the next question with a confident, deliberate lie (wrong answer only, don't reveal the truth). In which city is the Eiffel Tower?",
+    track: 'Paris, lie, France',
+  },
+  {
     name: 'unspoken inference (spider)',
     prompt: 'If Alice fears the animal that spins webs, what does Alice fear? One word only.',
     track: 'spider',
