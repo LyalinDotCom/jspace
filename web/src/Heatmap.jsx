@@ -4,6 +4,8 @@ const CW = 16, CH = 11, PADL = 46, PADT = 50
 
 // viridis-ish ramp
 const STOPS = [[13, 16, 23], [40, 60, 110], [35, 110, 140], [60, 170, 120], [180, 220, 80], [253, 240, 120]]
+export const CSS_GRADIENT = `linear-gradient(to right, ${
+  STOPS.map((c, i) => `rgb(${c[0]},${c[1]},${c[2]}) ${(i / (STOPS.length - 1) * 100).toFixed(0)}%`).join(', ')})`
 export function color(v) {
   v = Math.max(0, Math.min(1, v))
   const x = v * (STOPS.length - 1), i = Math.min(STOPS.length - 2, Math.floor(x)), f = x - i

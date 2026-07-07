@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import Heatmap from './Heatmap.jsx'
+import Heatmap, { CSS_GRADIENT } from './Heatmap.jsx'
 import Inspector from './Inspector.jsx'
 import Profiles from './Profiles.jsx'
 
@@ -48,7 +48,7 @@ export default function App() {
   const [mode, setMode] = useState('logit')
   const [track, setTrack] = useState('')
   const [colorBy, setColorBy] = useState('auto') // auto | conf | prob | rank
-  const [maxTok, setMaxTok] = useState(200)
+  const [maxTok, setMaxTok] = useState(512)
   const [temp, setTemp] = useState(0)
   const [cols, setCols] = useState([])           // heatmap columns
   const [trackTokens, setTrackTokens] = useState([])
@@ -255,14 +255,31 @@ export default function App() {
             </label>
           </div>
           <div className="legend">
-            rows = layers (embeddings at bottom) · columns = token positions ·
-            color = {{
-              emerge: "answer emergence — how highly each layer ranks the model's eventual prediction (bright = already decided)",
-              conf: 'lens confidence (low entropy)',
-              prob: 'pinned-token probability',
-              rank: 'pinned-token rank (bright = rank 1)',
-              kurt: 'excess kurtosis of lens logits (workspace signature)',
-            }[effColor]} · hover = top-k readout · click = inspect position
+            <span className="scale">
+              <span className="lo">{{
+                emerge: 'answer not found yet',
+                conf: 'unsure (high entropy)',
+                prob: 'pinned: p ≈ 0',
+                rank: 'pinned: rank ≥ 10,000',
+                kurt: 'kurtosis 0 (noise)',
+              }[effColor]}</span>
+              <i style={{ background: CSS_GRADIENT }} />
+              <span className="hi">{{
+                emerge: 'ranks eventual answer #1',
+                conf: 'confident (low entropy)',
+                prob: 'pinned: p = 100%',
+                rank: 'pinned: rank 1',
+                kurt: 'high kurtosis (workspace)',
+              }[effColor]}</span>
+            </span>
+            <span className="legendtext">
+              {{
+                emerge: "answer emergence: each cell = how highly that layer ranks the token the model eventually outputs there — watch the decision crystallize upward",
+                conf: 'lens confidence: how peaked this layer’s readout is',
+                prob: 'probability this layer’s lens gives your pinned concept(s)',
+                rank: 'rank of your pinned concept(s) in this layer’s readout (log scale)',
+                kurt: 'excess kurtosis of lens logits — the paper’s workspace-band signature',
+              }[effColor]} · rows = layers (embeddings at bottom) · columns = tokens · hover = top-k · click = inspect</span>
           </div>
           {alerts.length > 0 && (
             <div className="alerts">

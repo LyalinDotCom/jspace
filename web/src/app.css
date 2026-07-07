@@ -69,6 +69,14 @@ button:disabled { opacity: 0.45; cursor: default; }
 .vizbar input[type=number] { width: 60px; }
 .vizbar input:not([type]) { width: 130px; }
 .legend { color: var(--dim); font-size: 11px; padding: 6px 14px; }
+.legend .scale { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+.legend .scale i {
+  width: 140px; height: 9px; border-radius: 4px; display: inline-block;
+  border: 1px solid #333c4f;
+}
+.legend .scale .lo, .legend .scale .hi { font-size: 10px; }
+.legend .scale .hi { color: #e8d98a; }
+.legendtext { display: block; }
 .alerts { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 14px 6px; }
 .alert {
   background: #2a2210; border: 1px solid #ffd479; color: #ffd479;
