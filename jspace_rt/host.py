@@ -16,14 +16,37 @@ import threading
 
 import torch
 
-MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "model", "gemma-4-E4B")
-JLENS_PATH = os.path.join(os.path.dirname(__file__), "..", "calib", "jlens.pt")
+_ROOT = os.path.join(os.path.dirname(__file__), "..")
+
+
+def default_model_dir():
+    """JSPACE_MODEL env wins; otherwise prefer the instruct model (the chat
+    UI and the paper's demos assume an assistant), else the base model."""
+    env = os.environ.get("JSPACE_MODEL")
+    if env:
+        return env if os.path.isabs(env) else os.path.join(_ROOT, "model", env)
+    it = os.path.join(_ROOT, "model", "gemma-4-E4B-it")
+    if os.path.exists(os.path.join(it, "config.json")):
+        return it
+    return os.path.join(_ROOT, "model", "gemma-4-E4B")
+
+
+def jlens_path(model_dir):
+    return os.path.join(_ROOT, "calib",
+                        f"jlens-{os.path.basename(os.path.normpath(model_dir))}.pt")
+
+
+# legacy single-model path, still read as a fallback
+JLENS_PATH = os.path.join(_ROOT, "calib", "jlens.pt")
 
 
 class Host:
-    def __init__(self, model_dir=MODEL_DIR, device="mps"):
+    def __init__(self, model_dir=None, device="mps"):
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
+        model_dir = model_dir or default_model_dir()
+        self.model_dir = model_dir
+        self.model_name = os.path.basename(os.path.normpath(model_dir))
         self.device = device
         self.tok = AutoTokenizer.from_pretrained(model_dir)
         self.model = AutoModelForCausalLM.from_pretrained(
@@ -43,11 +66,17 @@ class Host:
         self.load_jlens()
 
     def load_jlens(self):
-        if os.path.exists(JLENS_PATH):
-            blob = torch.load(JLENS_PATH, map_location="cpu")
-            self.jlens = blob["J"].to(self.device, torch.bfloat16)
-            self.jlens_meta = blob.get("meta", {})
-            return True
+        for path in (jlens_path(self.model_dir), JLENS_PATH):
+            if os.path.exists(path):
+                blob = torch.load(path, map_location="cpu")
+                meta = blob.get("meta", {})
+                # a legacy shared file calibrated for another model is worse
+                # than no J-lens at all — skip it
+                if meta.get("model") and meta["model"] != self.model_name:
+                    continue
+                self.jlens = blob["J"].to(self.device, torch.bfloat16)
+                self.jlens_meta = meta
+                return True
         return False
 
     # ---- lens ----------------------------------------------------------

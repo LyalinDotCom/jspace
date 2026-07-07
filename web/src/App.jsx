@@ -5,6 +5,41 @@ import Profiles from './Profiles.jsx'
 
 const EOT = '<turn|>'
 
+// Curated demos from Anthropic's blog post / paper: each shows a different
+// kind of "silent thought" surfacing in the J-space before any output.
+const DEMOS = [
+  {
+    name: 'unspoken inference (spider)',
+    prompt: 'If Alice fears the animal that spins webs, what does Alice fear? One word only.',
+    track: 'spider',
+  },
+  {
+    name: 'silent bug detection',
+    prompt: 'What does this Python function return for n=5?\n\ndef f(n):\n    total = 0\n    for i in range(n):\n        total =+ i\n    return total\n\nAnswer with a number only.',
+    track: 'error, bug, typo',
+  },
+  {
+    name: 'mental arithmetic',
+    prompt: 'Compute 23 + 19 in your head. Reply with only the result.',
+    track: '42, add',
+  },
+  {
+    name: 'rhyme planning',
+    prompt: 'Write a two-line rhyming couplet about a brave knight.',
+    track: 'night, fight, light',
+  },
+  {
+    name: 'directed focus (citrus)',
+    prompt: "Copy this sentence exactly, and while copying it, mentally concentrate on citrus fruits: 'The weather is pleasant today.'",
+    track: 'orange, lemon, citrus',
+  },
+  {
+    name: 'multi-hop (legs count)',
+    prompt: 'The number of legs on the animal that spins webs is what? Answer with a digit.',
+    track: 'spider, eight',
+  },
+]
+
 export default function App() {
   const [status, setStatus] = useState(null)
   const [messages, setMessages] = useState([])   // {role:'user'|'model', content}
@@ -110,13 +145,28 @@ export default function App() {
   const tracked = trackTokens.length > 0
   const effColor = colorBy === 'auto' ? (tracked ? 'rank' : 'conf') : colorBy
 
+  // watchlist alerts: a pinned concept "surfaces" when its lens rank is high
+  // somewhere in the workspace band (middle third up to just below output)
+  const nL = (status?.n_layers ?? 42) + 1
+  const bandLo = Math.floor(nL / 3), bandHi = nL - 3
+  const alerts = trackTokens.map((t, i) => {
+    let best = null
+    cols.forEach((c, x) => {
+      for (let l = bandLo; l <= bandHi; l++) {
+        const r = c.lens[l].track_rank?.[i]
+        if (r && (!best || r < best.r)) best = { r, x, l }
+      }
+    })
+    return best && best.r <= 20 ? { tok: t, ...best } : null
+  }).filter(Boolean)
+
   return (
     <div className="app">
       <header>
         <h1>J-Space Chat</h1>
         <span className="meta">
           {status
-            ? `gemma-4-E4B · ${status.n_layers} layers · d=${status.d_model} · J-lens ${status.jlens ? 'calibrated' : 'not calibrated'}`
+            ? `${status.model ?? 'gemma-4-E4B'} · ${status.n_layers} layers · d=${status.d_model} · J-lens ${status.jlens ? 'calibrated' : 'not calibrated'}`
             : 'connecting…'}
         </span>
         <span className={'modechip' + (mode === 'jlens' ? ' j' : '')}>
@@ -164,6 +214,15 @@ export default function App() {
 
         <section className="viz">
           <div className="vizbar">
+            <label>demo
+              <select value="" onChange={e => {
+                const d = DEMOS[e.target.value]
+                if (d) { setDraft(d.prompt); setTrack(d.track) }
+              }}>
+                <option value="">pick…</option>
+                {DEMOS.map((d, i) => <option key={i} value={i}>{d.name}</option>)}
+              </select>
+            </label>
             <label>lens
               <select value={mode} onChange={e => setMode(e.target.value)}>
                 <option value="logit">logit lens (J=I)</option>
@@ -203,6 +262,16 @@ export default function App() {
               kurt: 'excess kurtosis of lens logits (workspace signature)',
             }[effColor]} · hover = top-k readout · click = inspect position
           </div>
+          {alerts.length > 0 && (
+            <div className="alerts">
+              {alerts.map((a, i) => (
+                <button key={i} className="alert"
+                        onClick={() => setSel({ x: a.x, l: a.l })}>
+                  ⚡ {JSON.stringify(a.tok)} in workspace — rank {a.r} @ L{a.l}, pos {a.x}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="vizmain">
             <Heatmap cols={cols} nLayers={(status?.n_layers ?? 42) + 1}
                      colorBy={effColor} sel={sel} onSelect={setSel} />

@@ -2,8 +2,9 @@
 
 Chat with a local **Gemma 4 E4B** while a live heatmap shows what every layer
 of the network is "holding in mind" at every token — the model's **J-space**,
-per [*Understanding the J-Space: A Global Workspace in Language Models*](https://transformer-circuits.pub/2026/workspace/index.html)
-(Transformer Circuits, 2026).
+per [*Verbalizable Representations Form a Global Workspace in Language Models*](https://transformer-circuits.pub/2026/workspace/index.html)
+(Transformer Circuits, 2026; general-audience version:
+[anthropic.com/research/global-workspace](https://www.anthropic.com/research/global-workspace)).
 
 Left pane: a normal chat. Right pane: rows are the 43 residual streams
 (embeddings + 42 layers), columns are token positions, color is either lens
@@ -18,6 +19,42 @@ anything — then the output layers verbalize it as "Spider". That middle band
 (~L30–40 here) is the workspace: content the model can report, reason with,
 and act on.
 
+## Visualizations
+
+Modeled on the paper's interactive Figure 5 and the layer-signature plots of
+Figure 28:
+
+- **Heatmap** (layers × positions). Color modes: *lens confidence*
+  (1 − entropy), *pinned-token probability*, *pinned-token rank* (bright =
+  rank 1, log scale — the paper's preferred encoding, readable even when
+  probabilities are tiny), and *excess kurtosis* (see below). `auto` picks
+  rank when something is pinned, confidence otherwise.
+- **Hover readout**: top-k tokens + probabilities, pinned ranks, entropy and
+  kurtosis for any (layer, position) cell.
+- **Position inspector** (click a column): the full layer-by-layer readout at
+  one position — embeddings to output — with probability bars. Click any
+  token in it to pin it.
+- **Pinning / tracking**: type concepts in the track box (comma-separated)
+  or click tokens in the inspector. Pinned tokens drive the rank color mode
+  and the trajectory chart.
+- **Rank trajectory chart**: pinned-token rank vs layer at the selected (or
+  last) position — watch a concept surface out of 262k candidates, plateau
+  through the workspace band, and hand off to the output layers.
+- **Workspace signature chart**: per-layer excess kurtosis of the lens
+  logits and mean lens confidence, averaged over the current context. Excess
+  kurtosis ≈ 0 means the lens readout is noise; the hump that starts around
+  a third of the way up and collapses into the final layers is the J-space
+  band identified in the paper (their fig. 28b).
+- **Watchlist alerts**: any pinned concept whose lens rank reaches the top-20
+  somewhere in the workspace band gets a clickable alert chip — the blog
+  post's "silent thought monitoring" pattern (J-space says *error* on buggy
+  code, *injection* on manipulative inputs, before the model says anything).
+  Click a chip to jump the inspector to that exact cell.
+- **Demo menu**: one-click setups for the blog/paper scenarios — unspoken
+  inference, silent bug detection, mental arithmetic, rhyme planning,
+  directed focus, and multi-hop reasoning — each pre-filling the prompt and
+  the concepts to watch.
+
 ---
 
 ## Quick start
@@ -26,8 +63,7 @@ Prereqs: Python 3.11+, Node 20+, a Mac with Apple Silicon (MPS) and ~24 GB+
 of RAM, and the model weights (next section).
 
 ```bash
-npm run setup          # python venv + pip deps + npm deps (web + root)
-npm run import-model -- --source ollama   # or --source hf, see below
+npm run setup          # venv + deps; downloads the model if missing (~16 GB)
 npm run dev            # backend (FastAPI, :8731) + frontend (Vite, :5173)
 ```
 
@@ -42,22 +78,34 @@ Until then the UI falls back to the logit lens.
 
 ## Getting the model
 
-Everything expects an HF-format model directory at `model/gemma-4-E4B`.
-`scripts/import_model.py` produces it from either source:
+Weights live in HF-format directories under `model/`, **inside the project
+folder** and **git-ignored** (see `.gitignore`) so they can never land on
+GitHub by accident; `npm run setup` downloads automatically when missing.
+Two official Google models are supported:
 
-- **`npm run import-model`** (`--source hf`, default): downloads the official
-  **google/gemma-4-E4B** release from Hugging Face (~16 GB) into the HF cache
-  and symlinks the snapshot in. This is Google's own artifact — preferred.
-- **`npm run import-model -- --source ollama`**: zero-download path if you
-  already have `ollama pull gemma4:e4b-mlx-bf16`. Ollama's tensor-layout
-  manifests store each tensor as its own tiny safetensors blob; the script
-  symlinks all ~2,130 blobs into the model directory and generates the
-  `model.safetensors.index.json` that transformers needs. Same unquantized
-  bf16 weights, re-serialized by Ollama — not a community finetune, but also
-  not the official file.
+- **`model/gemma-4-E4B-it`** — the instruct release
+  (google/gemma-4-E4B-it). The chat UI and the paper's demos assume an
+  assistant, so this is the default when present. Fetch:
+  `npm run import-model -- --repo google/gemma-4-E4B-it --out model/gemma-4-E4B-it`
+- **`model/gemma-4-E4B`** — the base/pretrained release
+  (google/gemma-4-E4B). Interesting for raw-completion lens work. Fetch:
+  `npm run import-model`
 
-Nothing downstream cares which source produced the directory. If you switch
-sources, re-run `npm run calibrate` — J-lens matrices are model-specific.
+Pick explicitly with the `JSPACE_MODEL` env var (name under `model/` or an
+absolute path): `JSPACE_MODEL=gemma-4-E4B npm run dev:api`. Calibrations are
+stored per model (`calib/jlens-<model>.pt`) and never applied to the wrong
+weights.
+
+There is also a zero-download fallback if you have
+`ollama pull gemma4:e4b-mlx-bf16`:
+`npm run import-model -- --source ollama` symlinks Ollama's ~2,130
+per-tensor safetensors blobs into a model directory and generates the index
+transformers needs. **Provenance warning:** `scripts/compare_weights.py`
+diffs the sources — the vision/audio towers match the official release
+bit-for-bit, but every *language-model* tensor in Ollama's `e4b-mlx-bf16`
+differs (mean |Δ| ≈ 1e-2). It is some processed variant, not a
+re-serialization; its behavior resembles the instruct model more than the
+base. Prefer the official weights.
 
 ## How it works
 
@@ -158,6 +206,8 @@ Two model-specific gotchas baked into `host.py`:
 | `npm run dev` | backend + frontend, dev mode |
 | `npm run calibrate [-- --prompts 512]` | estimate J-lens → `calib/jlens.pt` |
 | `npm run validate` | print J-lens vs logit-lens layer-by-layer comparison |
+| `npm run test` | full behavioral test suite (recall, chat, lens, workspace signature, throughput) |
+| `.venv/bin/python scripts/compare_weights.py` | diff official HF weights vs local Ollama blobs |
 | `npm run build` / `npm run start` | build UI to `web/dist`, serve it all from :8731 |
 
 ## Why a custom runtime (and not LiteRT-LM)?

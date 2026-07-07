@@ -49,6 +49,7 @@ if os.path.isdir(os.path.join(STATIC, "assets")):
 @app.get("/status")
 def status():
     return JSONResponse({
+        "model": HOST.model_name,
         "n_layers": HOST.n_layers,
         "d_model": HOST.d_model,
         "jlens": HOST.jlens is not None,

@@ -31,7 +31,7 @@ import time
 
 import torch
 
-from jspace_rt.host import Host, JLENS_PATH
+from jspace_rt.host import Host, jlens_path
 
 TOPICS = [
     "The mitochondria is the organelle responsible for producing ATP through cellular respiration.",
@@ -102,10 +102,13 @@ def main():
     ap.add_argument("--cross-weight", type=float, default=0.0,
                     help="mix-in weight for the cross-position (t' > t) term")
     ap.add_argument("--prompts-file", help="optional newline-separated corpus file")
-    ap.add_argument("--out", default=JLENS_PATH)
+    ap.add_argument("--out", default=None, help="default: calib/jlens-<model>.pt")
     args = ap.parse_args()
 
     host = Host()
+    if args.out is None:
+        args.out = jlens_path(host.model_dir)
+    print(f"calibrating {host.model_name} -> {args.out}")
     model, tok, dev = host.model, host.tok, host.device
     d, nl = host.d_model, host.n_layers + 1  # +1: embeddings row
 
@@ -168,6 +171,7 @@ def main():
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     torch.save({"J": J, "meta": {
+        "model": host.model_name,
         "prompts": len(corpus), "targets": args.targets, "probes": args.probes,
         "rank": args.rank, "cross_weight": args.cross_weight,
         "backwards": total_bw, "gammas": gammas,
