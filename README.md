@@ -114,30 +114,68 @@ trade: weights must be bf16, so RAM decides which model size you can run
 
 ---
 
-## Setting up a new machine
+## Getting started on a clean machine
 
-Prereqs: **macOS on Apple Silicon** (MPS), **Python ≥ 3.11**, **Node ≥ 20**,
-git, and disk/RAM per the model matrix below. (Linux + CUDA should work by
-changing `device="mps"` in `jspace_rt/host.py` — untested.)
+### 1. Prerequisites
 
-```bash
-git clone https://github.com/LyalinDotCom/jspace.git
-cd jspace
-npm run setup        # venv + pip deps + npm deps; offers the default model
-                     # download (gemma-4-E4B-it, ~16 GB) if none is present
-npm run dev          # → http://localhost:5173
-```
-
-Then, once per model (worth it — the logit-lens fallback is blind in the
-middle layers where the workspace lives):
+**macOS on Apple Silicon** (the model runs on MPS), plus:
 
 ```bash
-npm run calibrate    # J-lens for the active model → calib/jlens-<model>.pt
-npm test             # 18-check behavioral + lens test suite
+python3 --version   # need ≥ 3.11
+node --version      # need ≥ 20
+git --version
 ```
 
-Restart `npm run dev` (or `curl -X POST localhost:8731/reload_jlens`) after
-calibrating.
+RAM and disk depend on the model — see the matrix below. (Linux + CUDA
+should work by changing `device="mps"` in `jspace_rt/host.py` — untested.)
+
+### 2. Standard setup — any Mac with 24 GB+ RAM
+
+One paste, start to chatting (downloads gemma-4-E4B-it, ~16 GB):
+
+```bash
+git clone https://github.com/LyalinDotCom/jspace.git && cd jspace \
+&& npm run setup \
+&& npm run calibrate \
+&& npm test \
+&& npm run dev
+```
+
+Then open **http://localhost:5173**. The calibrate step (~20 min) builds
+the J-lens; it's skippable if you're impatient — the app falls back to the
+logit lens — but the workspace band is blind without it, and it only runs
+once per model.
+
+### 3. Big-machine setup — 64 GB+ RAM (runs the 26B)
+
+Same, plus the official 26B MoE (~52 GB download, resumable). The server
+auto-prefers it once present:
+
+```bash
+git clone https://github.com/LyalinDotCom/jspace.git && cd jspace \
+&& npm run setup \
+&& npm run import-model -- --repo google/gemma-4-26B-A4B-it --out model/gemma-4-26B-A4B-it \
+&& npm run calibrate -- --prompts 192 \
+&& npm test \
+&& npm run dev
+```
+
+Notes for this path:
+- `npm run setup` also downloads gemma-4-E4B-it (~16 GB) as a fallback
+  model when none is present — harmless; skip it with Ctrl-C during that
+  download if you only want the 26B, then continue with the next command.
+- First-pass calibration uses `--prompts 192`; rerun later with
+  `-- --prompts 384` for a higher-quality lens.
+- Every command is safe to rerun individually — downloads resume,
+  calibration overwrites cleanly.
+
+### Day-to-day
+
+```bash
+npm run dev                              # start everything → localhost:5173
+JSPACE_MODEL=gemma-4-E2B-it npm run dev  # pick a specific model
+curl -X POST localhost:8731/reload_jlens # pick up a fresh calibration live
+```
 
 ### Model matrix
 
