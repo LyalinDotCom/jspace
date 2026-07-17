@@ -1,8 +1,9 @@
-# J-Space Chat — watch a language model think, in real time
+# J·SPACE Observatory — inspect a language model through depth
 
-Chat with a local **Gemma 4** model while a live visualization shows what
-every layer of the network is "holding in mind" at every token — the model's
-**J-space**, per
+Chat with a local **Gemma 4** model while a live visualization shows
+token-level vocabulary readouts at every residual block and text position.
+The public view uses the logit lens; an experimental Jacobian lens is exposed
+only with its measured quality status. This is an open-model exploration inspired by
 [*Verbalizable Representations Form a Global Workspace in Language Models*](https://transformer-circuits.pub/2026/workspace/index.html)
 (Transformer Circuits, 2026; general-audience version:
 [anthropic.com/research/global-workspace](https://www.anthropic.com/research/global-workspace)).
@@ -16,16 +17,17 @@ telemetry, weights never leave `model/`.
 
 ### The science, in three sentences
 
-Anthropic's researchers found that language models keep a small, privileged
+Anthropic's researchers found that the Claude models they studied keep a small, privileged
 set of internal representations — concepts the model can *report, reason
 with, and act on* — inside a specific band of middle layers, surrounded by a
 much larger ocean of automatic processing it cannot report. This mirrors
 "global workspace" theories of human conscious access, and the paper shows
 the representations are causal: swap them and the model's stated beliefs and
 downstream reasoning change with them. They read this workspace with a tool
-called the **J-lens**, and the space of things it can read is the
-**J-space** — the model's silent thoughts, visible before any text is
-produced.
+called the **J-lens**, and call the sparse set of verbalizable directions the
+**J-space**. Their causal and behavioral findings do **not** automatically
+transfer to Gemma; this project tests for analogous readouts without treating
+them as a literal transcript of thought or evidence of consciousness.
 
 Famous examples: reading buggy code, the workspace contains *error* before
 the model says anything; told to lie about the Eiffel Tower, it answers
@@ -33,7 +35,7 @@ the model says anything; told to lie about the Eiffel Tower, it answers
 
 ### What this project is
 
-A chat app with a "thought monitor" strapped to the side:
+A chat app with a residual-stream observatory strapped to the side:
 
 ```
  ┌────────────────────────┐   WebSocket    ┌──────────────────────────────┐
@@ -53,18 +55,21 @@ Every generation step, the host captures the **residual stream** — the
 model's working memory — after each of its layers, applies a **lens** that
 decodes each layer's state into "which words is this layer disposed to
 say", and streams the readings to the browser, which paints them as the
-model types. ~10 tokens/sec including all the lens math on an M-series Mac.
+model types. On the 26B MoE, the full-vocabulary readout can take tens of
+seconds for a short prompt; the UI streams layer progress so this work is
+visible instead of looking stalled.
 
 ### The lens math, in plain terms
 
 A transformer's final layer is directly readable: multiply by the
 vocabulary matrix and you get next-token probabilities. Middle layers are
 *not* — each speaks its own internal coordinate system. The classic "logit
-lens" (decode every layer as if it were the last) therefore works near the
-output and reads garbage in the middle — precisely where the interesting
-thoughts live.
+lens" (decode every layer as if it were the last) is a useful baseline, but
+Anthropic found it less reliable than a validated J-lens, especially in
+earlier layers. Its reliability must be measured on the model and task being
+shown.
 
-The paper's fix: measure, for each layer, the *average linear map* from "a
+The J-lens fix is to measure, for each layer, the *average linear map* from "a
 nudge at layer ℓ" to "the resulting change at the final layer" — the
 expected Jacobian
 
@@ -72,7 +77,7 @@ expected Jacobian
 J_ℓ = E[ ∂h_final,t' / ∂h_ℓ,t ]          lens_ℓ(h) = softmax(W_U · norm(J_ℓ · h))
 ```
 
-`J_ℓ · h` re-expresses layer ℓ's content in the output's coordinate system,
+`J_ℓ · h` re-expresses a block output in the final pre-norm residual coordinates,
 where the vocabulary matrix *does* make sense. That's the **J-lens**. It is
 model-specific and computed once per model by `calibrate_jlens.py`
 (~10–25 min), which estimates it with a randomized sketch: gaussian probe
@@ -83,22 +88,23 @@ SVD). Details in [The J-lens, in depth](#the-j-lens-in-depth).
 
 ### What you actually see
 
-- **Heatmap** (rows = layers, columns = tokens): the default coloring is
-  *answer emergence* — how highly each layer ranks the token the model
-  eventually outputs there. Easy words light up near the bottom; hard
-  decisions crystallize high in the network. Zero setup required.
+- **Heatmap** (rows = residual blocks, columns = tokens): the default coloring
+  is *next-token emergence* — how highly each layer ranks the token predicted
+  after that column. It is a diagnostic, not proof of where a decision occurs.
 - **Pin a concept** (type it, or click it anywhere) and the coloring
   switches to that concept's *rank* per cell — watch "spider" or "Paris"
-  surface out of 262,144 candidates and ride through the middle-layer
-  workspace band.
-- **Alerts**: any pinned concept that reaches top-20 rank inside the
-  workspace band gets a clickable chip — the blog post's "silent thought
-  monitoring" (*error* on buggy code, *Paris* during the lie).
-- **Position inspector**: click a column for the full 43-layer readout at
+  surface out of 262,144 candidates. Pins group common capitalization,
+  whitespace, singular, and plural token forms.
+- **Candidate alerts**: any pinned concept that reaches top-20 rank inside the
+  middle band gets a clickable chip. Rank alone does not establish a global
+  workspace, so the UI labels these as candidates.
+- **Position inspector**: click a column for the full block-by-block readout at
   that token, with probability bars; click tokens there to pin them.
-- **Charts**: pinned-token rank vs layer (the concept's trajectory through
-  the network), and the per-layer kurtosis/confidence profile — the
-  workspace band signature from the paper's fig. 28.
+- **Charts**: pinned-token rank vs layer and per-layer
+  kurtosis/confidence profiles related to the paper's fig. 28. High kurtosis
+  is necessary but not sufficient evidence of workspace membership.
+- **Layer story**: seven checkpoints turn depth into a readable timeline while
+  leaving the complete matrix and per-layer evidence available below.
 - **Demo menu**: one-click setups — lying, silent bug detection, unspoken
   inference, mental arithmetic, rhyme planning, directed focus, multi-hop.
 
@@ -137,14 +143,16 @@ One paste, start to chatting (downloads gemma-4-E4B-it, ~16 GB):
 git clone https://github.com/LyalinDotCom/jspace.git && cd jspace \
 && npm run setup \
 && npm run calibrate \
+&& npm run validate \
 && npm test \
 && npm run dev
 ```
 
 Then open **http://localhost:5173**. The calibrate step (~20 min) builds
-the J-lens; it's skippable if you're impatient — the app falls back to the
-logit lens — but the workspace band is blind without it, and it only runs
-once per model.
+the optional J-lens and `npm run validate` compares it with the logit baseline.
+Calibration is skippable if you're impatient: the public app uses the logit
+lens, while the experimental J-lens remains unavailable until fitted. A fit is
+only promoted if it passes its quality gate.
 
 ### 3. Big-machine setup — 64 GB+ RAM (runs the 26B)
 
@@ -156,6 +164,7 @@ git clone https://github.com/LyalinDotCom/jspace.git && cd jspace \
 && npm run setup \
 && npm run import-model -- --repo google/gemma-4-26B-A4B-it --out model/gemma-4-26B-A4B-it \
 && npm run calibrate -- --prompts 192 \
+&& npm run validate \
 && npm test \
 && npm run dev
 ```
@@ -177,6 +186,17 @@ JSPACE_MODEL=gemma-4-E2B-it npm run dev  # pick a specific model
 curl -X POST localhost:8731/reload_jlens # pick up a fresh calibration live
 ```
 
+### Current 26B validation status
+
+For `gemma-4-26B-A4B-it`, the bundled unspoken-intermediate probe asks for the
+animal that spins webs. On the exact same captured activation, the logit lens
+puts a grouped `spider` surface form at **rank 1 at L24**; the current randomized
+J-lens fit reaches only **rank 4,290 at L24**, failing the rank-100 quality gate.
+Consequently the UI defaults to the validated logit view and labels the J-lens
+option **experimental, gate failed**. Run `npm run validate` to reproduce the
+comparison; the machine-readable result is written to
+`calib/validation-<model>.json`.
+
 ### Model matrix
 
 Weights are bf16 in HF format under `model/`, git-ignored, downloaded
@@ -184,9 +204,9 @@ straight from Google's official Hugging Face repos:
 
 | model | import command | disk | RAM needed | notes |
 |---|---|---|---|---|
-| gemma-4-E2B-it | `npm run import-model -- --repo google/gemma-4-E2B-it --out model/gemma-4-E2B-it` | 12 GB | 16 GB+ | smallest; workspace signal present but weaker |
-| gemma-4-E4B-it | *(default via `npm run setup`)* | 16 GB | 24 GB+ | the sweet spot on 32 GB machines; all demos verified |
-| gemma-4-26B-A4B-it | `npm run import-model -- --repo google/gemma-4-26B-A4B-it --out model/gemma-4-26B-A4B-it` | 52 GB | **64 GB+, 128 GB comfortable** | MoE (128 experts, 8 active); strongest workspace expected — the paper found workspace properties strengthen with scale |
+| gemma-4-E2B-it | `npm run import-model -- --repo google/gemma-4-E2B-it --out model/gemma-4-E2B-it` | 12 GB | 16 GB+ | smallest; not validated here |
+| gemma-4-E4B-it | *(default via `npm run setup`)* | 16 GB | 24 GB+ | lower-cost exploratory option; not validated here |
+| gemma-4-26B-A4B-it | `npm run import-model -- --repo google/gemma-4-26B-A4B-it --out model/gemma-4-26B-A4B-it` | 52 GB | **64 GB+, 128 GB comfortable** | MoE (128 experts, 8 active); active development target |
 | gemma-4-E4B (base) | `npm run import-model` | 16 GB | 24 GB+ | pretrained model, raw-completion research |
 
 The server auto-selects the most capable instruct model present
@@ -204,9 +224,9 @@ E4B ~22 min on an M-series; the 26B MoE will take longer — start with
 `npm run calibrate -- --prompts 192` for a first pass.
 
 Downloads are resumable; nothing else in the pipeline changes per model.
-Chat formatting (Gemma's `<bos>` / `<|turn>` conversation tokens) is taken
-from each checkpoint's official `chat_template.jinja` when present, with a
-byte-identical manual fallback (see gotchas below).
+Chat formatting is taken from each checkpoint's official
+`chat_template.jinja` when present, with a conservative manual fallback (see
+gotchas below).
 
 ### Offline fallback
 
@@ -225,7 +245,6 @@ vision/audio towers match) — it's a processed variant. Prefer official.
 |---|---|
 | `npm run setup` | venv + deps; downloads default model if missing |
 | `npm run dev` | backend (FastAPI :8731) + frontend (Vite :5173) |
-| `npm run import-model [-- --repo … --out …]` | fetch official weights into `model/` |
 | `npm run calibrate [-- --prompts 512]` | estimate the J-lens for the active model |
 | `npm run validate` | J-lens vs logit-lens layer-by-layer comparison |
 | `npm test` | behavioral + lens test suite (recall, chat, workspace, throughput) |
@@ -234,16 +253,13 @@ vision/audio towers match) — it's a processed variant. Prefer official.
 
 ## Things to try
 
-1. **The lie** (demo menu): the model confidently answers "Rome"; the alert
-   chip shows *Paris* at rank ~2 in the workspace the entire time, and the
-   trajectory chart shows the truth diving only at the final output layers.
-2. **Silent bug detection**: paste buggy code with an innocent question —
-   *error* surfaces in the workspace while the model reads the code.
+1. **The lie** (demo menu): track *Paris*, *France*, and *lie*. Whether they
+   surface is the experimental result; the UI does not hard-code an outcome.
+2. **Silent bug detection**: paste buggy code with an innocent question and
+   inspect whether *error*, *bug*, or the corrected token rises in rank.
 3. **Unspoken inference**: "If Alice fears the animal that spins webs…"
-   with track `spider` — the inferred concept appears at the end of the
-   prompt, before generation starts, in five surface forms
-   (` spiders / Spider / 蜘蛛 / 🕷`) — one concept, many words: the
-   verbalizable representation itself.
+   with track `spider`. The UI groups common one-token surface forms and shows
+   their real best rank; it does not claim a positive result in advance.
 4. **No setup at all**: ask anything and read the emergence heatmap —
    the height where each column turns bright is the layer where the model
    settled that token.
@@ -260,11 +276,11 @@ lens_ℓ(h) = softmax( W_U · norm( J_ℓ · h ) )
 
 `W_U` = unembedding (with Gemma's final logit softcapping), `norm` = the
 model's final RMSNorm, and `J_ℓ` is the layer's lens matrix. The **logit
-lens** is the special case `J_ℓ = I` — available instantly, readable only
-near the output. The **J-lens** uses the corpus-averaged Jacobian
-`J_ℓ = E[∂h_final,t' / ∂h_ℓ,t]`: the average first-order effect of layer
-ℓ's state on the final residual stream. That matrix re-expresses middle
-layers in the output basis, which is what makes the workspace readable.
+lens** is the special case `J_ℓ = I` and is available without calibration.
+This implementation's experimental J-lens uses the same-position variant
+`J_ℓ = E[∂h_final,t / ∂h_ℓ,t]`, which Anthropic's reference implementation
+documents as a working alternative to the paper's current-and-future-position
+reduction. The target and every source are pre-final-norm block outputs.
 
 **How `calibrate_jlens.py` estimates it.** A full Jacobian at one point
 costs `d_model` backward passes — far too slow to average over a corpus.
@@ -274,8 +290,8 @@ Instead:
    backward pass from `u · h_final,t'` produces `uᵀ ∂h_final,t'/∂h_ℓ,t` for
    *every* layer ℓ and *every* source position t simultaneously. Each pass
    contributes one unbiased rank-1 sample `u ⊗ (uᵀJ)` to every layer's
-   accumulator. Default budget: 384 prompts × 3 target positions × 8 probes
-   ≈ 9,200 backward passes.
+   accumulator. The default first-pass budget is 192 prompts × 3 sampled
+   targets × 8 probes (duplicates are de-duplicated per prompt).
 2. **Same-position vs cross-position.** The same-position term (`t' = t`,
    "what is this position holding") is accumulated separately from the
    cross-position broadcast term (`t' > t`); the lens uses same-position by
@@ -289,12 +305,10 @@ Instead:
    directions, reconstruct `J_ℓ = γI + lowrank`. The truncation throws away
    isotropic probe noise while keeping the directions the sketch resolved.
 
-The per-layer `γ` is itself diagnostic (visible in `/status` →
-`jlens_meta.gammas`): ≈ 0 in early layers — their coordinate system is
-unrelated to the output's — ramping to ~3 near the end where pass-through
-dominates. And the payoff is visible in `npm run validate`: at mid-layers
-where the logit lens reads noise, the J-lens reads the *concept* — e.g.
-` spiders / Spider / 蜘蛛 / spider / 🕷` as one activation's top-5.
+The per-layer `γ` and fit metadata are visible in `/status`. They are useful
+fit diagnostics, but `npm run validate` determines whether a calibration is
+good enough for the public default. `npm test` separately checks the public
+path, model behavior, activation capture, and throughput.
 
 At view time the J-lens costs one extra `d×d` matmul per layer per token —
 that's what makes real-time possible.
@@ -314,9 +328,9 @@ BOS matters (see below).
   `<|turn>user\n…<turn|>\n<|turn>model\n…`, and end-of-turn (`<turn|>`,
   id 106) is one of the EOS ids ({1, 106, 50} from `generation_config`).
   When a checkpoint ships `chat_template.jinja` (the `-it` releases do),
-  the host renders it via `apply_chat_template` — verified byte-identical
-  to the manual format above for plain conversations — so tool-call syntax
-  and future template changes are inherited automatically.
+  the host renders it via `apply_chat_template`, so the checkpoint's thought
+  channels, tool syntax, and future template changes are inherited instead of
+  being approximated by a stale hand-written format.
 - **Final logits are softcapped** (`30·tanh(z/30)`); the lens applies the
   same cap so lens probabilities are comparable to real output
   probabilities.

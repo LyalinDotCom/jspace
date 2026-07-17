@@ -1,5 +1,4 @@
-"""Model host: loads Gemma 4 E4B (reconstructed from the Ollama blob store)
-and exposes a generation loop that yields per-layer hidden states each step.
+"""Model host for local Gemma checkpoints and per-block lens readouts.
 
 The J-space paper (transformer-circuits.pub/2026/workspace) reads the model's
 "workspace" by applying a per-layer lens to residual-stream activations:
@@ -39,6 +38,11 @@ def jlens_path(model_dir):
                         f"jlens-{os.path.basename(os.path.normpath(model_dir))}.pt")
 
 
+def validation_path(model_dir):
+    return os.path.join(_ROOT, "calib",
+                        f"validation-{os.path.basename(os.path.normpath(model_dir))}.json")
+
+
 # legacy single-model path, still read as a fallback
 JLENS_PATH = os.path.join(_ROOT, "calib", "jlens.pt")
 
@@ -59,16 +63,29 @@ class Host:
         lm = self.model.model.language_model
         self.final_norm = lm.norm
         self.lm_head = self.model.lm_head
+        self.layers = lm.layers
         self.n_layers = len(lm.layers)
         self.d_model = lm.config.hidden_size
         self.softcap = getattr(lm.config, "final_logit_softcapping", None)
         self.lock = threading.Lock()
+        # Hugging Face's output_hidden_states[-1] is post-final-norm, but the
+        # reference J-lens records residual-block outputs and applies the
+        # model's norm only during unembedding. Capture the last block output
+        # so every row below uses that same, pre-norm residual convention.
+        self._last_block_output = None
+        self._last_block_hook = self.layers[-1].register_forward_hook(
+            self._capture_last_block
+        )
         # J-lens matrices: tensor [n_layers+1, d, d] or None (logit-lens mode)
         self.jlens = None
         self.jlens_meta = None
+        self.jlens_validation = None
         self.load_jlens()
 
     def load_jlens(self):
+        self.jlens = None
+        self.jlens_meta = None
+        self.jlens_validation = None
         for path in (jlens_path(self.model_dir), JLENS_PATH):
             if os.path.exists(path):
                 blob = torch.load(path, map_location="cpu")
@@ -77,10 +94,43 @@ class Host:
                 # than no J-lens at all — skip it
                 if meta.get("model") and meta["model"] != self.model_name:
                     continue
-                self.jlens = blob["J"].to(self.device, torch.bfloat16)
+                J = blob.get("J")
+                expected = (self.n_layers, self.d_model, self.d_model)
+                if J is None or tuple(J.shape) != expected:
+                    continue
+                # v2 fixes a critical convention mismatch in the original
+                # prototype (post-norm targets followed by a second norm).
+                if meta.get("residual_convention") != "block_output_pre_final_norm_v2":
+                    continue
+                self.jlens = J.to(self.device, torch.bfloat16)
                 self.jlens_meta = meta
+                report = validation_path(self.model_dir)
+                if os.path.exists(report):
+                    with open(report) as f:
+                        self.jlens_validation = json.load(f)
                 return True
         return False
+
+    def _capture_last_block(self, module, inputs, output):
+        self._last_block_output = output if torch.is_tensor(output) else output[0]
+
+    def residual_states(self, hidden_states):
+        """Return one pre-final-norm residual per transformer block.
+
+        Transformers exposes embeddings plus block outputs, but replaces the
+        final block output with its normalized value. Reconstruct the exact
+        block-output convention used by Anthropic's reference implementation.
+        """
+        if len(hidden_states) == self.n_layers:
+            return tuple(hidden_states)
+        if len(hidden_states) != self.n_layers + 1:
+            raise ValueError(
+                f"expected {self.n_layers + 1} HF hidden states or "
+                f"{self.n_layers} residual states, got {len(hidden_states)}"
+            )
+        if self._last_block_output is None:
+            raise RuntimeError("last residual block output was not captured")
+        return tuple(hidden_states[1:-1]) + (self._last_block_output,)
 
     # ---- lens ----------------------------------------------------------
 
@@ -93,12 +143,14 @@ class Host:
             z = self.softcap * torch.tanh(z / self.softcap)
         return z
 
-    def lens_read(self, hidden_states, mode="logit", topk=5, track_ids=None):
+    def lens_read(self, hidden_states, mode="logit", topk=5, track_ids=None,
+                  progress=None):
         """hidden_states: tuple of [1, S, d] per layer (len n_layers+1).
 
         Returns per (layer, position): top-k token ids/probs, entropy, and
         probability of tracked token ids.
         """
+        hidden_states = self.residual_states(hidden_states)
         # what the model will actually predict at each position (final layer's
         # argmax) — used for the zero-setup "answer emergence" color mode
         nl = len(hidden_states) - 1
@@ -127,14 +179,27 @@ class Host:
                 "final_rank": final_rank.cpu().tolist(),
             }
             if track_ids:
-                row["track_p"] = [
-                    [round(x, 6) for x in p[:, i].cpu().tolist()] for i in track_ids
-                ]
-                row["track_rank"] = [
-                    ((p > p[:, i : i + 1]).sum(-1) + 1).cpu().tolist()
-                    for i in track_ids
-                ]
+                # A watched concept may have several single-token surface
+                # forms ("spider", " Spider", "spiders", ...). Treat the
+                # best-scoring form as the concept's score instead of making
+                # the UI guess which tokenizer spelling the model will use.
+                groups = [[g] if isinstance(g, int) else list(g)
+                          for g in track_ids]
+                track_p, track_rank = [], []
+                for group in groups:
+                    ids = torch.tensor(group, device=p.device, dtype=torch.long)
+                    best_p = p.index_select(-1, ids).max(-1).values
+                    track_p.append([
+                        round(x, 6) for x in best_p.cpu().tolist()
+                    ])
+                    track_rank.append(
+                        ((p > best_p.unsqueeze(-1)).sum(-1) + 1).cpu().tolist()
+                    )
+                row["track_p"] = track_p
+                row["track_rank"] = track_rank
             out.append(row)
+            if progress:
+                progress(l + 1, len(hidden_states))
         return out
 
     # ---- generation ----------------------------------------------------
@@ -175,12 +240,13 @@ class Host:
         ids = self._encode(prompt, chat).to(self.device)
 
         out = self.model(input_ids=ids, output_hidden_states=True, use_cache=True)
+        residuals = self.residual_states(out.hidden_states)
         toks = [self.tok.decode([t]) for t in ids[0].tolist()]
         yield {
             "event": "prefill",
             "token_ids": ids[0].tolist(),
             "tokens": toks,
-            "hidden_states": out.hidden_states,
+            "hidden_states": residuals,
         }
 
         past = out.past_key_values
@@ -193,13 +259,14 @@ class Host:
                 input_ids=cur, past_key_values=past,
                 output_hidden_states=True, use_cache=True,
             )
+            residuals = self.residual_states(out.hidden_states)
             past = out.past_key_values
             tid = cur[0, 0].item()
             yield {
                 "event": "token",
                 "token_id": tid,
                 "token": self.tok.decode([tid]),
-                "hidden_states": out.hidden_states,
+                "hidden_states": residuals,
             }
             if tid in eos:
                 break

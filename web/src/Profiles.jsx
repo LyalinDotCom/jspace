@@ -6,7 +6,7 @@ import React from 'react'
  *   - right: excess kurtosis + confidence profile across layers, averaged
  *     over positions — the "workspace band" signature.
  */
-const PIN_COLORS = ['#ffd479', '#ff9de2', '#7ef0d0', '#9db8ff', '#ffb37e']
+const PIN_COLORS = ['#f6d47d', '#f39fc8', '#78e6d0', '#93adff', '#ef9e74']
 
 export default function Profiles({ cols, nLayers, trackTokens, sel }) {
   if (!cols.length) return null
@@ -24,7 +24,7 @@ export default function Profiles({ cols, nLayers, trackTokens, sel }) {
   }
 
   return (
-    <div className="profiles">
+    <section className="profiles">
       {tracked ? (
         <Chart title={`pinned-token rank by layer @ pos ${pos} (${JSON.stringify(cell.token)})`}
                yLabel="rank (log)" nLayers={nLayers}
@@ -40,36 +40,54 @@ export default function Profiles({ cols, nLayers, trackTokens, sel }) {
         <div className="chart empty">pin tokens (track box, or click tokens in the
           inspector) to see their rank trajectory across layers</div>
       )}
-      <Chart title="workspace signature (mean over positions)"
+      {tracked ? (
+        <Chart title={`pinned-token rank by position @ L${sel?.l ?? nLayers - 1}`}
+               nLayers={cols.length} bands={false} prefix="P"
+               series={trackTokens.map((t, i) => ({
+                 name: JSON.stringify(t),
+                 color: PIN_COLORS[i % PIN_COLORS.length],
+                 values: cols.map(col => {
+                   const rank = col.lens[sel?.l ?? nLayers - 1]?.track_rank?.[i] ?? 10000
+                   return Math.max(0, 1 - Math.log10(rank) / 4)
+                 }),
+               }))} />
+      ) : null}
+      <Chart title="distributional profile · mean over positions"
              yLabel="" nLayers={nLayers}
              series={[
                {
-                 name: 'excess kurtosis', color: '#5eb1ff',
+                 name: 'excess kurtosis', color: '#7aa7ff',
                  values: kurt.map(k => Math.min(1, Math.max(0, k / Math.max(...kurt, 1)))),
                  label: l => `kurt ${kurt[l].toFixed(1)}`,
                },
                {
-                 name: 'lens confidence', color: '#9ef0b1',
+                 name: 'lens confidence', color: '#78e6d0',
                  values: conf,
                  label: l => `conf ${(conf[l] * 100).toFixed(0)}%`,
                },
              ]} />
-    </div>
+    </section>
   )
 }
 
-function Chart({ title, series, nLayers }) {
+function Chart({ title, series, nLayers, bands = true, prefix = 'L' }) {
   const W = 460, H = 110, PL = 8, PB = 16, PT = 18
-  const x = l => PL + (l / (nLayers - 1)) * (W - PL - 8)
+  const x = l => PL + (l / Math.max(1, nLayers - 1)) * (W - PL - 8)
   const y = v => PT + (1 - v) * (H - PT - PB)
+  const ticks = [...new Set([0, Math.round((nLayers - 1) / 3), Math.round((nLayers - 1) * 2 / 3), nLayers - 1])]
   return (
     <div className="chart">
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+        {bands && <>
+          <rect x={x(0)} y={PT} width={x(Math.floor(nLayers / 3)) - x(0)} height={H - PT - PB} className="band early" />
+          <rect x={x(Math.floor(nLayers / 3))} y={PT} width={x(nLayers - 3) - x(Math.floor(nLayers / 3))} height={H - PT - PB} className="band workspace" />
+          <rect x={x(nLayers - 3)} y={PT} width={x(nLayers - 1) - x(nLayers - 3)} height={H - PT - PB} className="band motor" />
+        </>}
         <text x={PL} y={11} className="ctitle">{title}</text>
-        {[0, 10, 20, 30, 40].filter(l => l < nLayers).map(l => (
+        {ticks.map(l => (
           <g key={l}>
             <line x1={x(l)} y1={PT} x2={x(l)} y2={H - PB} className="grid" />
-            <text x={x(l)} y={H - 4} className="cx">L{l}</text>
+            <text x={x(l)} y={H - 4} className="cx">{prefix}{l}</text>
           </g>
         ))}
         {series.map((s, i) => (

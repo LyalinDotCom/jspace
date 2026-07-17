@@ -1,4 +1,4 @@
-"""Calibrate the J-lens for Gemma 4 E4B.
+"""Calibrate a same-position Jacobian lens for the active Gemma model.
 
 Estimates the per-layer expected Jacobian to the final residual stream,
 
@@ -22,7 +22,12 @@ noise-dominated, so two structural choices recover the signal:
 Usage:
     .venv/bin/python calibrate_jlens.py --prompts 192 --targets 3 --probes 8
 
-Writes calib/jlens.pt; server picks it up on restart or POST /reload_jlens.
+This is the per-position estimator explicitly described as a working variant
+in Anthropic's reference implementation. The paper's main estimator also sums
+current-and-future target positions; ``--cross-weight`` can mix an experimental
+cross-position estimate back in.
+
+Writes calib/jlens-<model>.pt; server picks it up on restart or reload.
 """
 
 import argparse
@@ -110,7 +115,10 @@ def main():
         args.out = jlens_path(host.model_dir)
     print(f"calibrating {host.model_name} -> {args.out}")
     model, tok, dev = host.model, host.tok, host.device
-    d, nl = host.d_model, host.n_layers + 1  # +1: embeddings row
+    # One residual-block output per layer. This matches Anthropic's reference
+    # hooks and deliberately excludes the embedding row and post-final-norm
+    # Hugging Face hidden state.
+    d, nl = host.d_model, host.n_layers
 
     global TOPICS
     if args.prompts_file:
@@ -129,7 +137,7 @@ def main():
         ids = ids.to(dev)
         S = ids.shape[1]
         out = model(input_ids=ids, output_hidden_states=True, use_cache=False)
-        hs = out.hidden_states  # tuple of [1,S,d], graph-connected
+        hs = host.residual_states(out.hidden_states)
         h_final = hs[-1]
 
         tprimes = sorted(set(torch.randint(S // 2, S, (args.targets,), generator=g).tolist()))
@@ -175,6 +183,11 @@ def main():
         "prompts": len(corpus), "targets": args.targets, "probes": args.probes,
         "rank": args.rank, "cross_weight": args.cross_weight,
         "backwards": total_bw, "gammas": gammas,
+        "estimator": "same_position_gaussian_sketch",
+        "corpus": "bundled_synthetic_topics",
+        "corpus_topics": len(TOPICS),
+        "residual_convention": "block_output_pre_final_norm_v2",
+        "reference_compatible_unembed": True,
         "seconds": round(time.time() - t0),
     }}, args.out)
     print(f"saved {args.out}  ({tuple(J.shape)}, {time.time()-t0:.0f}s)")

@@ -1,8 +1,7 @@
-"""J-space live viewer server.
+"""Local Jacobian-lens observatory server.
 
-Runs Gemma 4 E4B locally (weights reconstructed from the Ollama blob store)
-and streams per-(layer, position) lens readings over a WebSocket while the
-model generates, so you can watch the model's J-space in real time.
+Runs the selected local Gemma checkpoint and streams per-(layer, position)
+lens evidence over a WebSocket while the model generates.
 
     .venv/bin/python server.py   ->  http://127.0.0.1:8731
 """
@@ -54,6 +53,7 @@ def status():
         "d_model": HOST.d_model,
         "jlens": HOST.jlens is not None,
         "jlens_meta": HOST.jlens_meta or {},
+        "jlens_validation": HOST.jlens_validation or {},
     })
 
 
@@ -76,6 +76,36 @@ async def ws(sock: WebSocket):
         stop.set()
 
 
+def concept_token_ids(text):
+    """Return single-token surface forms for one human concept label.
+
+    J-lens vectors are token-indexed, so capitalization, leading whitespace,
+    and inflection otherwise look like unrelated concepts. Grouping common
+    one-token forms makes a pin behave like the concept the user typed while
+    keeping the underlying token-level limitation explicit in the UI.
+    """
+    base = text.strip()
+    if not base:
+        return [], []
+    words = {base, base.lower(), base.capitalize(), base.title(), base.upper()}
+    if base.isalpha():
+        stem = base[:-1] if base.lower().endswith("s") and len(base) > 3 else base
+        words.update({stem, stem.lower(), stem.capitalize(), stem + "s",
+                      (stem + "s").capitalize()})
+    candidates = {w for word in words for w in (word, " " + word)}
+    ids = set()
+    for candidate in candidates:
+        enc = HOST.tok.encode(candidate, add_special_tokens=False)
+        if len(enc) == 1:
+            ids.add(enc[0])
+    if not ids:
+        enc = HOST.tok.encode(base, add_special_tokens=False)
+        if enc:
+            ids.add(enc[0])
+    ordered = sorted(ids)
+    return ordered, [HOST.tok.decode([i]) for i in ordered]
+
+
 async def run_generation(sock, req, stop):
     prompt = req.get("messages") or req.get("prompt", "")
     mode = req.get("mode", "logit")
@@ -83,11 +113,13 @@ async def run_generation(sock, req, stop):
     track = req.get("track", [])  # list of strings to track across layers
     track_ids = []
     track_toks = []
+    track_variants = []
     for t in track:
-        enc = HOST.tok.encode(t, add_special_tokens=False)
-        if enc:
-            track_ids.append(enc[0])
-            track_toks.append(HOST.tok.decode([enc[0]]))
+        ids, variants = concept_token_ids(t)
+        if ids:
+            track_ids.append(ids)
+            track_toks.append(t.strip())
+            track_variants.append(variants)
     if mode == "jlens" and HOST.jlens is None:
         mode = "logit"
 
@@ -106,8 +138,22 @@ async def run_generation(sock, req, stop):
                 )
                 for ev in gen:
                     hs = ev.pop("hidden_states")
-                    ev["lens"] = HOST.lens_read(hs, mode=mode, topk=topk,
-                                                track_ids=track_ids)
+                    source_event = ev["event"]
+
+                    def on_progress(completed, total):
+                        loop.call_soon_threadsafe(q.put_nowait, {
+                            "event": "progress",
+                            "phase": "prefill" if source_event == "prefill" else "generation",
+                            "completed": completed,
+                            "total": total,
+                            "layer": completed - 1,
+                            "token": ev.get("token"),
+                        })
+
+                    ev["lens"] = HOST.lens_read(
+                        hs, mode=mode, topk=topk, track_ids=track_ids,
+                        progress=on_progress,
+                    )
                     loop.call_soon_threadsafe(q.put_nowait, ev)
             loop.call_soon_threadsafe(q.put_nowait, {"event": "done"})
         except Exception as e:  # surface errors to the client
@@ -121,6 +167,9 @@ async def run_generation(sock, req, stop):
         if ev["event"] in ("done", "error"):
             await sock.send_text(json.dumps(ev))
             break
+        if ev["event"] == "progress":
+            await sock.send_text(json.dumps(ev))
+            continue
         # decorate lens rows with decoded top-k strings
         for row in ev["lens"]:
             row["topk"] = [
@@ -128,6 +177,7 @@ async def run_generation(sock, req, stop):
             ]
         ev["mode"] = mode
         ev["track_tokens"] = track_toks
+        ev["track_variants"] = track_variants
         await sock.send_text(json.dumps(ev))
 
 
